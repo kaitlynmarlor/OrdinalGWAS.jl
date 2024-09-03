@@ -8,8 +8,10 @@ using SnpArrays, VCFTools, VariantCallFormat, BGEN
 using MathOptInterface
 const MOI = MathOptInterface
 @reexport using OrdinalMultinomialModels
+using GeneticVariantBase
 
-export ordinalgwas
+export ordinalgwas, univariate_score_test
+# export VCFTools.GeneticVariantBase
 
 include("gwas.jl")
 

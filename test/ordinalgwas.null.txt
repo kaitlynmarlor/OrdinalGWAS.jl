@@ -1,0 +1,13 @@
+StatsModels.TableRegressionModel{OrdinalMultinomialModel{Int64, Float64, LogitLink}, Matrix{Float64}}
+
+trait ~ sex
+
+Coefficients:
+───────────────────────────────────────────────────────
+                Estimate  Std.Error   t value  Pr(>|t|)
+───────────────────────────────────────────────────────
+intercept 1|2  -1.48564    0.358891  -4.13952    <1e-04
+intercept 2|3  -0.569479   0.341044  -1.66981    0.0959
+intercept 3|4   0.429815   0.339642   1.26549    0.2066
+sex             0.424656   0.213914   1.98517    0.0480
+───────────────────────────────────────────────────────
