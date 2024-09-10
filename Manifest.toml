@@ -916,8 +916,10 @@ version = "1.0.2"
 uuid = "4ec0a83e-493e-50e2-b9ac-8f72acf5a8f5"
 
 [[deps.VCFTools]]
-deps = ["CodecZlib", "Dates", "DelimitedFiles", "Distributions", "HypothesisTests", "ProgressMeter", "SpecialFunctions", "VariantCallFormat"]
-git-tree-sha1 = "5d4f34655c23019ac3252bbc17ea10113a69d26e"
+deps = ["CodecZlib", "Dates", "DelimitedFiles", "Distributions", "GeneticVariantBase", "HypothesisTests", "ProgressMeter", "SpecialFunctions", "TranscodingStreams", "VariantCallFormat"]
+git-tree-sha1 = "d5defa7d633c824b80fd5e86fab30db03bc24fc6"
+repo-rev = "v0.3"
+repo-url = "https://github.com/kaitlynmarlor/VCFTools.jl"
 uuid = "a620830f-fdd7-5ebc-8d26-3621ab35fbfe"
 version = "0.2.10"
 

@@ -866,17 +866,17 @@ function univariate_score_test(
       # Iterate through each index in snpmask 
 
     for j in eachindex(snpmask)
-        variant = iterate(iterator, j)
+        variant, _ = iterate(iterator, j)
 
-        chrom = chrom(data, variant)
+        chrom = GeneticVariantBase.chrom(data, variant)
         println("$chrom")
-        pos = pos(data, variant)
+        pos = GeneticVariantBase.pos(data, variant)
         print("$pos")
-        snpid = rsid(data, variant)
+        snpid = GeneticVariantBase.rsid(data, variant)
         print("$snpid")
-        allele1 = ref_allele(data, variant)
+        allele1 = GeneticVariantBase.ref_allele(data, variant)
         print("$allele1")
-        allele2 = alt_allele(data, variant)
+        allele2 = GeneticVariantBase.alt_allele(data, variant)
         print("$allele2")
 
         try 
