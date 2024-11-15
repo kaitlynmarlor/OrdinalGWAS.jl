@@ -1,4 +1,4 @@
-using OrdinalGWAS, Test, CSV, SnpArrays, DataFrames
+using OrdinalGWAS, Test, CSV, SnpArrays, DataFrames, VariantCallFormat, GeneticVariantBase
 
 const datadir = joinpath(dirname(@__FILE__), "..", "data")
 const covfile = datadir * "/covariate.txt"
@@ -14,6 +14,7 @@ const bgensnpsetfile = datadir * "/bgen_snpsetfile.txt"
 const bedfile = datadir * "/hapmap3.bed"
 const bimfile = datadir * "/hapmap3.bim"
 
+
 nm = ordinalgwas(@formula(trait ~ sex), covfile, nothing)
 
 # vcffile, vcftype, bgenfile, fittednullmodel, nsamples, bedfile, bimfile, bedn)
@@ -24,7 +25,8 @@ nm = ordinalgwas(@formula(trait ~ sex), covfile, nothing)
 # require certain arguments 
 # add checks for vcffile for example 
 
-univariate_score_test(vcffile, :DS, bgenfile, nm, 1, bedfile, bimfile, 1)
+univariate_score_test(vcffile, :DS, bgenfile, nm, 1, bedfile, bimfile, 1, filetype="PLINK")
+# check function signature nsamples nvariants 
 
 # @testset "score test" begin
 #     @time ordinalgwas(@formula(trait ~ sex), covfile, plkfile, test=:score)

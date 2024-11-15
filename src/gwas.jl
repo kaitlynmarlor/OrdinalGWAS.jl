@@ -1,6 +1,8 @@
-include("../../VCFTools/src/iterator.jl")
-include("../../SnpArrays/src/iterator.jl")
-include("../../BGEN/src/iterator.jl")
+using BGEN, SnpArrays, VCFTools, MathOptInterface
+const MOI = MathOptInterface
+import SnpArrays: SnpArrayIterator, SnpArrayIndex
+
+# import as packages instead of including as julia files 
 
 # eventually update the package 
 # for now use include change it to import 
@@ -670,17 +672,17 @@ function univariate_score_test(
     pvalfile::Union{AbstractString, IOStream} = "ordinalgwas.pval.txt", 
     snpmodel::Union{Val{1}, Val{2}, Val{3}} = ADDITIVE_MODEL,
     snpinds::Union{Nothing, AbstractVector{<:Integer}} = nothing,
-    bedrowinds::AbstractVector{<:Integer} = 1:bedn, # row indices for SnpArray
+    # bedrowinds::AbstractVector{<:Integer} = 1:bedn, # row indices for SnpArray
     solver::MOI.AbstractOptimizer = NLopt.Optimizer(),
     solver_config = Dict("algorithm" => :LD_SLSQP, "max_iter" => 4000), # :GT = genotype, :DS = dosage
     test::Symbol = :score,
-    vcfrowinds::AbstractVector{<:Integer} = 1:nsamples, # row indices for VCF array
+    # vcfrowinds::AbstractVector{<:Integer} = 1:nsamples, # row indices for VCF array
     verbose::Bool = false,
     snpset::Union{Nothing, Integer, AbstractString, #for snpset analysis
         AbstractVector{<:Integer}} = nothing,
     e::Union{Nothing, AbstractString, Symbol} = nothing, # for GxE analysis
     samplepath::Union{AbstractString, Nothing} = nothing,
-    bgenrowinds::AbstractVector{<:Integer} = 1:nsamples, # row indices for VCF array
+    rowinds::AbstractVector{<:Integer} = 1:nsamples, # row indices for VCF array
     
     )
 
@@ -734,19 +736,16 @@ function univariate_score_test(
         snponly = testformula.rhs == Term(:snp)
     
         # extra columns in design matrix to be tested
-        testdf = DataFrame(fittednullmodel.mf.data) # TODO: not type stable here
-        testdf[!, :snp] = zeros(size(fittednullmodel.mm, 1))
-        Z = similar(modelmatrix(testformula, testdf))
-        # SnpArrays.makestream(pvalfile, "w") do io
-
-        ts = OrdinalMultinomialScoreTest(fittednullmodel.model, Z)
 
         file = replace(bedfile, ".bed" => "") 
         data = SnpData(file)
+        # data = SnpData(SnpArrays.datadir(file))
+
+       #  SnpArray(SnpArrays.datadir(data))
 
         # CREATE SNP iterator
-        iterator = SnpArrayIterator(snpdata)
-                        
+        iterator = SnpArrayIterator(data)
+        # n = size(SnpArray(SnpArrays.datadir(data)), 1)
     end 
 
    # END OF PLINK IF STATEMENT 
@@ -770,7 +769,7 @@ function univariate_score_test(
             bgendata.io, first(bgen_iterator), bgendata.header)
         decompressed = Vector{UInt8}(undef, decompressed_length)
         bgenrowmask_UInt16 = zeros(UInt16, n_samples(bgendata))
-        bgenrowmask_UInt16[bgenrowinds] .= 1 
+        bgenrowmask_UInt16[rowinds] .= 1 
     
         # create SNP mask vector
         if snpinds === nothing
@@ -786,20 +785,13 @@ function univariate_score_test(
         analysistype in ["singlesnp", "snpset", "gxe"] || error("Analysis type $analysis invalid option. 
         Available options are 'singlesnp', 'snpset' and 'gxe'.")
 
-        # extra columns in design matrix to be tested
-        testdf = DataFrame(fittednullmodel.mf.data) # TODO: not type stable here
-        testdf[!, :snp] = zeros(size(fittednullmodel.mm, 1))
-        Z = similar(modelmatrix(testformula, testdf))
-
         # create holder for dosage/snps 
         snpholder = zeros(Union{Missing, Float64}, size(fittednullmodel.mm, 1))
 
         # carry out score or LRT test SNP by SNP
         snponly = testformula.rhs == Term(:snp)
         # SnpArrays.makestream(pvalfile, "w") do io
-        
-        ts = OrdinalMultinomialScoreTest(fittednullmodel.model, Z)
-
+    
         # CREATE BGEN iterator
         iterator = bgen_iterator 
         data = bgendata 
@@ -840,68 +832,107 @@ function univariate_score_test(
         # determine analysis type
 
         # extra columns in design matrix to be tested
-        testdf = DataFrame(fittednullmodel.mf.data) # TODO: not type stable here
-        testdf[!, :snp] = zeros(size(fittednullmodel.mm, 1))
-        Z = similar(modelmatrix(testformula, testdf))
-
-        # carry out score or LRT test SNP by SNP
-        snponly = testformula.rhs == Term(:snp)
-        # SnpArrays.makestream(pvalfile, "w") do io
-
-        # println(io, "chr,pos,snpid,ref,alt,pval")
-        ts = OrdinalMultinomialScoreTest(fittednullmodel.model, Z)
                 
         # CREATE VCF iterator
         iterator = VCFIterator(vcffile)
         data = VCFData(vcffile)
+        n = VCFTools.nsamples(vcffile)
 
     end 
 
     # END OF VCF IF STATEMENT 
 
-    println(io, "chr,pos,snpid,allele1,allele2,maf,hwepval,infoscore,pval")
+    println("chr,pos,snpid,allele1,allele2,maf,hwepval,infoscore,pval")
 
     # START OF SINGULAR FOR LOOP 
 
       # Iterate through each index in snpmask 
 
-    for j in eachindex(snpmask)
+    #snpmask 
+    for (j, _) in enumerate(snpmask) #this is weird need to fix later 
+
         variant, _ = iterate(iterator, j)
+        # println(variant)
+
+        testdf = DataFrame(fittednullmodel.mf.data) # TODO: not type stable here
+        testdf[!, :snp] = zeros(size(fittednullmodel.mm, 1))
+        Z = similar(modelmatrix(testformula, testdf))
+
+        if filetype == "VCF"
+            dosages = fill(0.0, length(variant.GENOTYPE))
+            GeneticVariantBase.alt_dosages!(dosages, variant)
+        end 
+
+        if filetype == "PLINK"
+            variant = SnpArrayIndex(j)
+            dosages = fill(0.0, length(iterator.snpdata.snparray))
+            GeneticVariantBase.alt_dosages!(dosages, iterator.snpdata, variant)
+        end 
+
+        
+        # try to use as close as possible to copy_gt VCFTools
+        
+         # carry out score or LRT test SNP by SNP
+        snponly = testformula.rhs == Term(:snp)
+         # SnpArrays.makestream(pvalfile, "w") do io
+ 
+        ts = OrdinalMultinomialScoreTest(fittednullmodel.model, Z)
+        ts.Z .= dosages[rowinds] 
+
+        println("TS.Z")
+        println((ts.Z))
+
+        # println(variant)
 
         chrom = GeneticVariantBase.chrom(data, variant)
-        println("$chrom")
-        pos = GeneticVariantBase.pos(data, variant)
-        print("$pos")
-        snpid = GeneticVariantBase.rsid(data, variant)
-        print("$snpid")
-        allele1 = GeneticVariantBase.ref_allele(data, variant)
-        print("$allele1")
-        allele2 = GeneticVariantBase.alt_allele(data, variant)
-        print("$allele2")
+        # println("chrom: $chrom")
 
+        pos = GeneticVariantBase.pos(data, variant)
+        # println("pos: $pos")
+
+        snpid = GeneticVariantBase.rsid(data, variant)
+        # println("id: $snpid")
+
+        allele1 = GeneticVariantBase.ref_allele(data, variant)
+        # println("allele1: $allele1")
+
+        allele2 = GeneticVariantBase.alt_allele(data, variant)
+        # println("allele2: $allele2")
+
+        mafreq = nothing 
         try 
-            maf = maf(data, variant)
-            print("$maf")
+            mafreq = GeneticVariantBase.maf(data, variant)
+            # println("maf: $maf")
         catch 
             print("-") 
         end
 
+        hwe_pval = nothing
         try 
-            hwe_pval = hwepval(data, variant)
-            print("$hwe_pval")
+            hwe_pval = GeneticVariantBase.hwepval(data, variant)
         catch
-            print("-") 
+            hwe_pval = "-"
         end
 
-        # try 
-        #     info_score()
-        #     print("$info_score")
-        # catch 
-        #     print("-")
-        # end
+        try 
+            info_score = 0.0
+        catch 
+            info_score = "-"
+        end
 
-        pval = polrtests(ts)
-        print("$pval")
+        if mafreq == 1 || mafreq == 0
+            pval = 1.0
+            println("entered if statement maf = $mafreq, pval = $pval")
+        else
+            pval = polrtest(ts)
+            println("entered else statement maf = $mafreq,pval = $pval")
+        end 
+        # println("pval: $pval")
+
+        # commas in between each 
+        println("chr,pos,snpid,allele1,allele2,maf,hwepval,infoscore,pval")
+
+        println("$chrom, $pos, $snpid, $allele1, $allele2, $mafreq, $hwe_pval, $info_score, $pval")
                 
     end
 
