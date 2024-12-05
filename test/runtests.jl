@@ -1,4 +1,4 @@
-using OrdinalGWAS, Test, CSV, SnpArrays, DataFrames, VariantCallFormat, GeneticVariantBase
+using OrdinalGWAS, Test, CSV, SnpArrays, DataFrames, VariantCallFormat, GeneticVariantBase, PGENFiles
 
 const datadir = joinpath(dirname(@__FILE__), "..", "data")
 const covfile = datadir * "/covariate.txt"
@@ -8,14 +8,20 @@ const vcfcovfile = datadir * "/vcf_example.csv"
 const vcffile = datadir * "/vcf_test"
 const vcfsnpsetfile = datadir * "/snpsetfile_vcf.txt"
 const bgencovfile = datadir * "/bgen_ex.csv"
-const bgenfile = datadir * "/bgen_test"
+const bgenfile = datadir * "/bgen_test.bgen" #is it fine to change this from bgen_test to bgen_test.bgen
 const bgensnpsetfile = datadir * "/bgen_snpsetfile.txt"
 
 const bedfile = datadir * "/hapmap3.bed"
 const bimfile = datadir * "/hapmap3.bim"
+const pgendata = PGENFiles.datadir("bgen_example.16bits.pgen")
 
+const dataset= SnpData(datadir * "/hapmap3")
+nsamples = size(dataset.snparray, 1)
+nvariants = size(dataset.snparray, 2)
 
 nm = ordinalgwas(@formula(trait ~ sex), covfile, nothing)
+
+#number of rows in snpdata 
 
 # vcffile, vcftype, bgenfile, fittednullmodel, nsamples, bedfile, bimfile, bedn)
 
@@ -25,7 +31,11 @@ nm = ordinalgwas(@formula(trait ~ sex), covfile, nothing)
 # require certain arguments 
 # add checks for vcffile for example 
 
-univariate_score_test(vcffile, :DS, bgenfile, nm, 1, bedfile, bimfile, 1, filetype="PLINK")
+
+#FIX THIS
+#bedn argument is redundant with nsamples
+
+univariate_score_test(vcffile, :DS, pgendata, nm, nsamples, bedfile, bimfile, nsamples, filetype="PGEN")
 # check function signature nsamples nvariants 
 
 # @testset "score test" begin

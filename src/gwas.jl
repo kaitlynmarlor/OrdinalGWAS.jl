@@ -752,6 +752,11 @@ function univariate_score_test(
 
     # START OF PGEN IF STATEMENT 
     if filetype == "PGEN"
+
+
+
+
+        
          
     end 
 
@@ -762,8 +767,11 @@ function univariate_score_test(
         config_solver(solver, solver_config)
         # open BGEN file and get number of SNPs in file
         bgendata = Bgen(bgenfile; sample_path=samplepath)
+        t = typeof(bgendata)
+        println("TYPE OF BGENDATA $t")
         nsnps = n_variants(bgendata) 
-        bgen_iterator = iterator(bgendata, from_bgen_starts = true) # interchangeable with GeneticVariantBase iterator    
+        # bgen_iterator = iterator(bgendata, from_bgen_starts = true) # interchangeable with GeneticVariantBase iterator
+        bgen_iterator = BGEN.BgenVariantIteratorFromStart(bgendata) 
         dosageholder = Vector{Float32}(undef, n_samples(bgendata))
         decompressed_length, _ = BGEN.check_decompressed_length(
             bgendata.io, first(bgen_iterator), bgendata.header)
@@ -849,10 +857,14 @@ function univariate_score_test(
       # Iterate through each index in snpmask 
 
     #snpmask 
-    for (j, _) in enumerate(snpmask) #this is weird need to fix later 
+    for (j, variant) in enumerate(iterator) #this is weird need to fix later 
 
-        variant, _ = iterate(iterator, j)
+        # variant, _ = iterate(iterator, j)
         # println(variant)
+
+        if !snpmask[j] #skip snp
+            continue
+        end
 
         testdf = DataFrame(fittednullmodel.mf.data) # TODO: not type stable here
         testdf[!, :snp] = zeros(size(fittednullmodel.mm, 1))
@@ -869,6 +881,19 @@ function univariate_score_test(
             GeneticVariantBase.alt_dosages!(dosages, iterator.snpdata, variant)
         end 
 
+        if filetype == "BGEN"
+            dosages = fill(0.0, n_samples(bgendata))
+            GeneticVariantBase.alt_dosages!(dosages, bgendata, variant; mean_impute=true)
+        end 
+
+        # need to decode bgen values using this below: 
+
+        # decompressed_length, _ = BGEN.check_decompressed_length(
+        # bgendata.io, first(bgen_iterator), bgendata.header)
+        # decompressed = Vector{UInt8}(undef, decompressed_length)
+        # bgenrowmask_UInt16 = zeros(UInt16, n_samples(bgendata))
+        # bgenrowmask_UInt16[bgenrowinds] .= 1
+
         
         # try to use as close as possible to copy_gt VCFTools
         
@@ -879,8 +904,8 @@ function univariate_score_test(
         ts = OrdinalMultinomialScoreTest(fittednullmodel.model, Z)
         ts.Z .= dosages[rowinds] 
 
-        println("TS.Z")
-        println((ts.Z))
+        #println("TS.Z")
+        #println((ts.Z))
 
         # println(variant)
 
@@ -922,10 +947,10 @@ function univariate_score_test(
 
         if mafreq == 1 || mafreq == 0
             pval = 1.0
-            println("entered if statement maf = $mafreq, pval = $pval")
+            #println("entered if statement maf = $mafreq, pval = $pval")
         else
             pval = polrtest(ts)
-            println("entered else statement maf = $mafreq,pval = $pval")
+            #println("entered else statement maf = $mafreq,pval = $pval")
         end 
         # println("pval: $pval")
 
