@@ -1,11 +1,13 @@
-using OrdinalGWAS, Test, CSV, SnpArrays, DataFrames, VariantCallFormat, GeneticVariantBase, PGENFiles
+using OrdinalGWAS, Test, CSV, SnpArrays, DataFrames, VariantCallFormat, GeneticVariantBase, PGENFiles, BGEN, Statistics, VCFTools
 
 const datadir = joinpath(dirname(@__FILE__), "..", "data")
 const covfile = datadir * "/covariate.txt"
 const plkfile = datadir * "/hapmap3"
 const snpsetfile = datadir * "/hapmap_snpsetfile.txt"
 const vcfcovfile = datadir * "/vcf_example.csv"
-const vcffile = datadir * "/vcf_test"
+const vcffile = datadir * "/vcf_test.vcf.gz"
+# const vcffile = joinpath(datadir, "vcf_test.vcf.gz")
+# const vcffile = "/Users/kaitlyn/.julia/dev/OrdinalGWAS/data/vcf_test.vcf.gz"
 const vcfsnpsetfile = datadir * "/snpsetfile_vcf.txt"
 const bgencovfile = datadir * "/bgen_ex.csv"
 const bgenfile = datadir * "/bgen_test.bgen" #is it fine to change this from bgen_test to bgen_test.bgen
@@ -13,13 +15,55 @@ const bgensnpsetfile = datadir * "/bgen_snpsetfile.txt"
 
 const bedfile = datadir * "/hapmap3.bed"
 const bimfile = datadir * "/hapmap3.bim"
-const pgendata = PGENFiles.datadir("bgen_example.16bits.pgen")
+const pgenfile = PGENFiles.datadir("bgen_example.16bits.pgen")
 
 const dataset= SnpData(datadir * "/hapmap3")
+
+
+# VCF tests
+
+@testset "vcf score test" begin
+    println("Constructed path: ", vcffile)
+    vcfdata = VCFTools.VCFData(vcffile)
+    nsamples = GeneticVariantBase.n_samples(vcfdata)
+    nm = ordinalgwas(@formula(y ~ sex), vcfcovfile, nothing)
+    univariate_score_test(vcffile, nm, nsamples, filetype="VCF")
+    @time univariate_score_test(vcffile, nm, nsamples, filetype="VCF")
+    @test isfile("ordinalgwas.null.txt")
+    @test isfile("ordinalgwas.pval.txt")
+    scorepvals = CSV.read("ordinalgwas.pval.txt", DataFrame)[!, :pval][1:5]
+    @test isapprox(scorepvals, [1.0, 4.56531284e-3, 3.10828383e-5, 1.21686724e-5, 8.20686005e-3], rtol=1e-4)
+    rm("ordinalgwas.null.txt", force=true)
+    rm("ordinalgwas.pval.txt", force=true)
+end
+
+
+
+
+# PLINK tests 
 nsamples = size(dataset.snparray, 1)
 nvariants = size(dataset.snparray, 2)
+nm = ordinalgwas(@formula(y ~ sex), covfile, nothing)
+univariate_score_test(plkfile, nm, nsamples, filetype="PLINK")
 
-nm = ordinalgwas(@formula(trait ~ sex), covfile, nothing)
+
+# BGEN tests 
+b = BGEN.Bgen(bgenfile)
+nsamples = GeneticVariantBase.n_samples(b)
+nvariants = GeneticVariantBase.n_variants(b)
+nm = ordinalgwas(@formula(y ~ sex), bgencovfile, nothing)
+univariate_score_test(bgenfile, nm, nsamples, filetype="BGEN")
+
+# PGEN tests 
+p = PGENFiles.Pgen(pgenfile)
+nsamples = GeneticVariantBase.n_samples(p)
+nvariants = GeneticVariantBase.n_variants(p)
+nm = ordinalgwas(@formula(y ~ sex), bgencovfile, nothing)
+univariate_score_test(pgenfile, nm, nsamples, filetype="PGEN")
+
+# put code to delete pval.txt file at the end of the tests 
+
+
 
 #number of rows in snpdata 
 
@@ -34,8 +78,6 @@ nm = ordinalgwas(@formula(trait ~ sex), covfile, nothing)
 
 #FIX THIS
 #bedn argument is redundant with nsamples
-
-univariate_score_test(vcffile, :DS, pgendata, nm, nsamples, bedfile, bimfile, nsamples, filetype="PGEN")
 # check function signature nsamples nvariants 
 
 # @testset "score test" begin
