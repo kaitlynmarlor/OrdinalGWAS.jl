@@ -1,4 +1,4 @@
-using BGEN, SnpArrays, VCFTools, MathOptInterface
+using BGEN, SnpArrays, VCFTools, MathOptInterface, PGENFiles
 const MOI = MathOptInterface
 import SnpArrays: SnpArrayIterator, SnpArrayIndex
 
@@ -655,18 +655,14 @@ function ordinalgwas(
 end
 
 
-function univariate_score_test( 
-    vcffile::Union{AbstractString, IOStream}, # full path and vcf file name
-    vcftype::Symbol,  
-    bgenfile::Union{AbstractString, IOStream}, # full path and bgen file name
+function univariate_score_test(   
+    filename::Union{AbstractString, IOStream}, # full path and vcf file name
+    # you can use filename to determine filetype   
     fittednullmodel::StatsModels.TableRegressionModel,
-    nsamples::Integer,          # number of samples in bed file
-    bedfile::Union{AbstractString, IOStream}, # full path and bed file name
-    bimfile::Union{AbstractString, IOStream}, # full path and bim file name
-    bedn::Integer;    # number of samples in bed file
-    
+    nsamples::Integer;    
+    vcftype::Symbol = :DS,
     # make vcffile bedfile optional empty string as default 
-    filetype="VCF",
+    filetype="VCF", # set filetype based on the filename 
     analysistype::AbstractString = "singlesnp",
     testformula::FormulaTerm = fittednullmodel.mf.f.lhs ~ Term(:snp),
     pvalfile::Union{AbstractString, IOStream} = "ordinalgwas.pval.txt", 
@@ -675,40 +671,88 @@ function univariate_score_test(
     # bedrowinds::AbstractVector{<:Integer} = 1:bedn, # row indices for SnpArray
     solver::MOI.AbstractOptimizer = NLopt.Optimizer(),
     solver_config = Dict("algorithm" => :LD_SLSQP, "max_iter" => 4000), # :GT = genotype, :DS = dosage
-    test::Symbol = :score,
-    # vcfrowinds::AbstractVector{<:Integer} = 1:nsamples, # row indices for VCF array
-    verbose::Bool = false,
-    snpset::Union{Nothing, Integer, AbstractString, #for snpset analysis
-        AbstractVector{<:Integer}} = nothing,
-    e::Union{Nothing, AbstractString, Symbol} = nothing, # for GxE analysis
     samplepath::Union{AbstractString, Nothing} = nothing,
     rowinds::AbstractVector{<:Integer} = 1:nsamples, # row indices for VCF array
-    
     )
 
     # CHANGE THE FILETYPE KEYWORD ARGUMENT TO A SYMBOL
 
     if lowercase(filetype) == "vcf"
-        vcftype in [:GT, :DS] || throw(ArgumentError("vcftype not specified. Allowable types are :GT for genotypes and :DS for dosages."))
-        if isfile(vcffile * ".vcf")
-            vcffile = vcffile * ".vcf"
+        if endswith(filename, ".vcf.gz") || endswith(filename, ".vcf")
+            nothing 
+        elseif endswith(filename, ".gz")
+            filename = filename * ".vcf.gz"  # Append .vcf.gz if it ends with .gz but not .vcf.gz
         else
-            fmt = findfirst(isfile, vcffile * ".vcf." .* SnpArrays.ALLOWED_FORMAT)
-            fmt === nothing && throw(ArgumentError("VCF file not found"))
-            vcffile = vcffile * ".vcf." * SnpArrays.ALLOWED_FORMAT[fmt]
+            filename = filename * ".vcf"  # Otherwise, append .vcf
         end
-        bedn = VCFTools.nsamples(vcffile)
     end 
-   
+
+    if lowercase(filetype) == "vcf"
+        vcftype in [:GT, :DS] || throw(ArgumentError("vcftype not specified. Allowable types are :GT for genotypes and :DS for dosages."))
+        if isfile(filename * ".vcf")
+            vcffile = filename * ".vcf"
+        else
+            fmt = findfirst(isfile, filename * ".vcf." .* SnpArrays.ALLOWED_FORMAT)
+            fmt === nothing && throw(ArgumentError("VCF file not found"))
+            vcffile = filename * ".vcf." * SnpArrays.ALLOWED_FORMAT[fmt]
+        end
+        bedn = VCFTools.nsamples(vcffile) # change to GeneticVariantBase
+    end 
+
+    # # Ensure file type is lowercase and matches "vcf"
+    # if lowercase(filetype) == "vcf"
+        
+    #     # Check for valid vcftype :GT or :DS
+    #     if !(vcftype in [:GT, :DS])
+    #         throw(ArgumentError("vcftype must be either :GT (genotype) or :DS (dosage)."))
+    #     end
+
+    #     # Try to find the exact VCF file, including .gz compression
+    #     vcf_filename = filename * ".vcf"      # Check for basic .vcf extension
+    #     vcf_gz_filename = filename * ".vcf.gz" # Check for .vcf.gz compressed file
+
+    #     if isfile(vcf_filename)
+    #         # If the .vcf file exists, use it
+    #         vcffile = vcf_filename
+    #     elseif isfile(vcf_gz_filename)
+    #         # If the .vcf.gz file exists, use it
+    #         vcffile = vcf_gz_filename
+    #     else
+    #         # Look for alternative formats using allowed file extensions
+    #         fmt = findfirst(isfile, filename * ".vcf." .* SnpArrays.ALLOWED_FORMAT)
+
+    #         # If no file is found with the given formats, throw an error
+    #         if fmt === nothing
+    #             throw(ArgumentError("VCF file not found. Allowed formats: " * join(SnpArrays.ALLOWED_FORMAT, ", ")))
+    #         end
+
+    #         # Assign the file with the correct format
+    #         vcffile = filename * ".vcf." * SnpArrays.ALLOWED_FORMAT[fmt]
+    #     end
+
+    #     # Obtain the number of samples from the VCF file (changing to GeneticVariantBase if necessary)
+    #     bedn = VCFTools.nsamples(vcffile)  # Note: Change to `GeneticVariantBase` if needed
+    # end
+
+
     iterator = nothing
     data = nothing  
+
+    config_solver(solver, solver_config)
+
+    analysistype = lowercase(analysistype)
+    analysistype in ["singlesnp", "snpset", "gxe"] || error("Analysis type $analysis invalid option. 
+    Available options are 'singlesnp', 'snpset' and 'gxe'.")
+
+    open(pvalfile, "w") do io
+        println(io, "chr,pos,snpid,allele1,allele2,maf,hwepval,infoscore,pval")  # Header
+    end
     
    # START OF PLINK IF STATEMENT 
 
     if filetype == "PLINK"
-        config_solver(solver, solver_config)
         # create SnpArray
-        genomat = SnpArrays.SnpArray(bedfile, bedn) # is a SnpArray from the bedfile 
+        genomat = SnpArrays.SnpArray(filename, bedn) # is a SnpArray from the bedfile 
     
         # data.bed then take the string and remove the .bed 
         # s = SnpData(“data”) genomat = s.snparray
@@ -718,26 +762,18 @@ function univariate_score_test(
     
         # create SNP mask vector
         if snpinds === nothing
-            snpmask = trues(SnpArrays.makestream(countlines, bimfile))
+            snpmask = trues(SnpArrays.makestream(countlines, filename))
         elseif eltype(snpinds) == Bool
             snpmask = snpinds
         else
-            snpmask = falses(SnpArrays.makestream(countlines, bimfile))
+            snpmask = falses(SnpArrays.makestream(countlines, filename))
             snpmask[snpinds] .= true
         end
-    
-        analysistype = lowercase(analysistype)
-        analysistype in ["singlesnp", "snpset", "gxe"] || error("Analysis type $analysis invalid option. 
-        Available options are 'singlesnp', 'snpset' and 'gxe'.")
-    
-        # determine analysis type
-    
+
         # carry out score or LRT test SNP by SNP
         snponly = testformula.rhs == Term(:snp)
-    
-        # extra columns in design matrix to be tested
 
-        file = replace(bedfile, ".bed" => "") 
+        file = replace(filename, ".bed" => "") 
         data = SnpData(file)
         # data = SnpData(SnpArrays.datadir(file))
 
@@ -752,12 +788,24 @@ function univariate_score_test(
 
     # START OF PGEN IF STATEMENT 
     if filetype == "PGEN"
+        p = PGENFiles.datadir(filename)
+        pgendata = PGENFiles.Pgen(p)
+        dosageholder = Vector{Float32}(undef, GeneticVariantBase.n_samples(pgendata))
+        nsnps = GeneticVariantBase.n_variants(pgendata)
 
+        # create SNP mask vector
+        if snpinds === nothing
+            snpmask = trues(nsnps)
+            println(nsnps)
+        elseif eltype(snpinds) == Bool
+            snpmask = snpinds
+        else
+            snpmask = falses(nsnps)
+            snpmask[snpinds] .= true
+        end
 
-
-
-        
-         
+        data = PGENFiles.Pgen(filename)
+        iterator = PGENFiles.iterator(data; startidx=1)
     end 
 
     # END OF PGEN IF STATEMENT 
@@ -766,17 +814,17 @@ function univariate_score_test(
     if filetype == "BGEN"
         config_solver(solver, solver_config)
         # open BGEN file and get number of SNPs in file
-        bgendata = Bgen(bgenfile; sample_path=samplepath)
+        bgendata = Bgen(filename; sample_path=samplepath)
         t = typeof(bgendata)
         println("TYPE OF BGENDATA $t")
-        nsnps = n_variants(bgendata) 
+        nsnps = GeneticVariantBase.n_variants(bgendata) 
         # bgen_iterator = iterator(bgendata, from_bgen_starts = true) # interchangeable with GeneticVariantBase iterator
         bgen_iterator = BGEN.BgenVariantIteratorFromStart(bgendata) 
-        dosageholder = Vector{Float32}(undef, n_samples(bgendata))
+        dosageholder = Vector{Float32}(undef, GeneticVariantBase.n_samples(bgendata))
         decompressed_length, _ = BGEN.check_decompressed_length(
             bgendata.io, first(bgen_iterator), bgendata.header)
         decompressed = Vector{UInt8}(undef, decompressed_length)
-        bgenrowmask_UInt16 = zeros(UInt16, n_samples(bgendata))
+        bgenrowmask_UInt16 = zeros(UInt16, GeneticVariantBase.n_samples(bgendata))
         bgenrowmask_UInt16[rowinds] .= 1 
     
         # create SNP mask vector
@@ -789,10 +837,6 @@ function univariate_score_test(
             snpmask[snpinds] .= true
         end
     
-        analysistype = lowercase(analysistype)
-        analysistype in ["singlesnp", "snpset", "gxe"] || error("Analysis type $analysis invalid option. 
-        Available options are 'singlesnp', 'snpset' and 'gxe'.")
-
         # create holder for dosage/snps 
         snpholder = zeros(Union{Missing, Float64}, size(fittednullmodel.mm, 1))
 
@@ -811,6 +855,7 @@ function univariate_score_test(
     # START OF VCF IF STATEMENT
     
     if filetype == "VCF"
+        print("entered if statement")
 
         config_solver(solver, solver_config)
         # get number of SNPs in file
@@ -831,15 +876,9 @@ function univariate_score_test(
             snpmask[snpinds] .= true
         end
 
-        analysistype = lowercase(analysistype)
-        analysistype in ["singlesnp", "snpset", "gxe"] || error("Analysis type $analysis invalid option. 
-        Available options are 'singlesnp', 'snpset' and 'gxe'.")
+        
         # open VCF File 
         reader = VCF.Reader(openvcf(vcffile))
-
-        # determine analysis type
-
-        # extra columns in design matrix to be tested
                 
         # CREATE VCF iterator
         iterator = VCFIterator(vcffile)
@@ -850,117 +889,113 @@ function univariate_score_test(
 
     # END OF VCF IF STATEMENT 
 
-    println("chr,pos,snpid,allele1,allele2,maf,hwepval,infoscore,pval")
-
     # START OF SINGULAR FOR LOOP 
 
-      # Iterate through each index in snpmask 
+    # Iterate through each index in snpmask 
 
-    #snpmask 
-    for (j, variant) in enumerate(iterator) #this is weird need to fix later 
+    open(pvalfile, "w") do io
+        for (j, variant) in enumerate(iterator) #this is weird need to fix later 
+            print("entered for loop")
 
-        # variant, _ = iterate(iterator, j)
-        # println(variant)
+            # variant, _ = iterate(iterator, j)
+            # println(variant)
 
-        if !snpmask[j] #skip snp
-            continue
+            if !snpmask[j] #skip snp
+                continue
+            end
+
+            testdf = DataFrame(fittednullmodel.mf.data) # TODO: not type stable here
+            testdf[!, :snp] = zeros(size(fittednullmodel.mm, 1))
+            Z = similar(modelmatrix(testformula, testdf))
+
+            # merge these by defining n_samples in GeneticVariantBase
+            if filetype == "VCF"
+                dosages = fill(0.0, length(variant.GENOTYPE))
+                GeneticVariantBase.alt_dosages!(dosages, variant) 
+            end 
+
+            if filetype == "PLINK"
+                variant = SnpArrayIndex(j)
+                dosages = fill(0.0, length(iterator.snpdata.snparray))
+                GeneticVariantBase.alt_dosages!(dosages, iterator.snpdata, variant)
+            end 
+
+            if filetype == "BGEN"
+                dosages = fill(0.0, GeneticVariantBase.n_samples(data))
+                GeneticVariantBase.alt_dosages!(dosages, data, variant; mean_impute=true)
+            end 
+
+            if filetype == "PGEN"
+                dosages = fill(0.0, GeneticVariantBase.n_samples(data))
+                GeneticVariantBase.alt_dosages!(dosages, data, variant; mean_impute=true)
+            end 
+
+            # need to decode bgen values using this below: 
+
+            # decompressed_length, _ = BGEN.check_decompressed_length(
+            # bgendata.io, first(bgen_iterator), bgendata.header)
+            # decompressed = Vector{UInt8}(undef, decompressed_length)
+            # bgenrowmask_UInt16 = zeros(UInt16, n_samples(bgendata))
+            # bgenrowmask_UInt16[bgenrowinds] .= 1
+
+            
+            # try to use as close as possible to copy_gt VCFTools
+            
+            # carry out score or LRT test SNP by SNP
+            snponly = testformula.rhs == Term(:snp)
+            # SnpArrays.makestream(pvalfile, "w") do io
+    
+            ts = OrdinalMultinomialScoreTest(fittednullmodel.model, Z)
+            ts.Z .= dosages[rowinds] 
+
+            #println("TS.Z")
+            #println((ts.Z))
+
+            # println(variant)
+
+            chrom = GeneticVariantBase.chrom(data, variant)
+            pos = GeneticVariantBase.pos(data, variant)
+            snpid = GeneticVariantBase.rsid(data, variant)
+            allele1 = GeneticVariantBase.ref_allele(data, variant)
+            allele2 = GeneticVariantBase.alt_allele(data, variant)
+
+            mafreq = nothing 
+            try 
+                mafreq = GeneticVariantBase.maf(data, variant)
+            catch 
+                mafreq = "-" 
+            end
+
+            hwe_pval = nothing
+            try 
+                hwe_pval = GeneticVariantBase.hwepval(data, variant)
+            catch
+                hwe_pval = "-"
+            end
+
+            info_score = nothing 
+            try 
+                info_score = GeneticVariantBase.infoscore(data, variant)
+            catch 
+                info_score = "-"
+            end
+
+            pval = nothing 
+            if mafreq == 1 || mafreq == 0
+                pval = 1.0
+                #println("entered if statement maf = $mafreq, pval = $pval")
+            else
+                pval = polrtest(ts)
+                #println("entered else statement maf = $mafreq,pval = $pval")
+            end 
+
+            # FOR VISUALIZATION PURPOSES WILL DELETE LATER 
+            println("chr,pos,snpid,allele1,allele2,maf,hwepval,infoscore,pval")
+            println("$chrom, $pos, $snpid, $allele1, $allele2, $mafreq, $hwe_pval, $info_score, $pval")
+
+            println(io, "$chrom, $pos, $snpid, $allele1, $allele2, $mafreq, $hwe_pval, $info_score, $pval")
         end
-
-        testdf = DataFrame(fittednullmodel.mf.data) # TODO: not type stable here
-        testdf[!, :snp] = zeros(size(fittednullmodel.mm, 1))
-        Z = similar(modelmatrix(testformula, testdf))
-
-        if filetype == "VCF"
-            dosages = fill(0.0, length(variant.GENOTYPE))
-            GeneticVariantBase.alt_dosages!(dosages, variant)
-        end 
-
-        if filetype == "PLINK"
-            variant = SnpArrayIndex(j)
-            dosages = fill(0.0, length(iterator.snpdata.snparray))
-            GeneticVariantBase.alt_dosages!(dosages, iterator.snpdata, variant)
-        end 
-
-        if filetype == "BGEN"
-            dosages = fill(0.0, n_samples(bgendata))
-            GeneticVariantBase.alt_dosages!(dosages, bgendata, variant; mean_impute=true)
-        end 
-
-        # need to decode bgen values using this below: 
-
-        # decompressed_length, _ = BGEN.check_decompressed_length(
-        # bgendata.io, first(bgen_iterator), bgendata.header)
-        # decompressed = Vector{UInt8}(undef, decompressed_length)
-        # bgenrowmask_UInt16 = zeros(UInt16, n_samples(bgendata))
-        # bgenrowmask_UInt16[bgenrowinds] .= 1
-
-        
-        # try to use as close as possible to copy_gt VCFTools
-        
-         # carry out score or LRT test SNP by SNP
-        snponly = testformula.rhs == Term(:snp)
-         # SnpArrays.makestream(pvalfile, "w") do io
- 
-        ts = OrdinalMultinomialScoreTest(fittednullmodel.model, Z)
-        ts.Z .= dosages[rowinds] 
-
-        #println("TS.Z")
-        #println((ts.Z))
-
-        # println(variant)
-
-        chrom = GeneticVariantBase.chrom(data, variant)
-        # println("chrom: $chrom")
-
-        pos = GeneticVariantBase.pos(data, variant)
-        # println("pos: $pos")
-
-        snpid = GeneticVariantBase.rsid(data, variant)
-        # println("id: $snpid")
-
-        allele1 = GeneticVariantBase.ref_allele(data, variant)
-        # println("allele1: $allele1")
-
-        allele2 = GeneticVariantBase.alt_allele(data, variant)
-        # println("allele2: $allele2")
-
-        mafreq = nothing 
-        try 
-            mafreq = GeneticVariantBase.maf(data, variant)
-            # println("maf: $maf")
-        catch 
-            print("-") 
-        end
-
-        hwe_pval = nothing
-        try 
-            hwe_pval = GeneticVariantBase.hwepval(data, variant)
-        catch
-            hwe_pval = "-"
-        end
-
-        try 
-            info_score = 0.0
-        catch 
-            info_score = "-"
-        end
-
-        if mafreq == 1 || mafreq == 0
-            pval = 1.0
-            #println("entered if statement maf = $mafreq, pval = $pval")
-        else
-            pval = polrtest(ts)
-            #println("entered else statement maf = $mafreq,pval = $pval")
-        end 
-        # println("pval: $pval")
-
-        # commas in between each 
-        println("chr,pos,snpid,allele1,allele2,maf,hwepval,infoscore,pval")
-
-        println("$chrom, $pos, $snpid, $allele1, $allele2, $mafreq, $hwe_pval, $info_score, $pval")
-                
-    end
-
+    end 
     return fittednullmodel 
 
 end  
