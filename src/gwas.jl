@@ -678,16 +678,6 @@ function univariate_score_test(
     # CHANGE THE FILETYPE KEYWORD ARGUMENT TO A SYMBOL
 
     if lowercase(filetype) == "vcf"
-        if endswith(filename, ".vcf.gz") || endswith(filename, ".vcf")
-            nothing 
-        elseif endswith(filename, ".gz")
-            filename = filename * ".vcf.gz"  # Append .vcf.gz if it ends with .gz but not .vcf.gz
-        else
-            filename = filename * ".vcf"  # Otherwise, append .vcf
-        end
-    end 
-
-    if lowercase(filetype) == "vcf"
         vcftype in [:GT, :DS] || throw(ArgumentError("vcftype not specified. Allowable types are :GT for genotypes and :DS for dosages."))
         if isfile(filename * ".vcf")
             vcffile = filename * ".vcf"
@@ -698,42 +688,6 @@ function univariate_score_test(
         end
         bedn = VCFTools.nsamples(vcffile) # change to GeneticVariantBase
     end 
-
-    # # Ensure file type is lowercase and matches "vcf"
-    # if lowercase(filetype) == "vcf"
-        
-    #     # Check for valid vcftype :GT or :DS
-    #     if !(vcftype in [:GT, :DS])
-    #         throw(ArgumentError("vcftype must be either :GT (genotype) or :DS (dosage)."))
-    #     end
-
-    #     # Try to find the exact VCF file, including .gz compression
-    #     vcf_filename = filename * ".vcf"      # Check for basic .vcf extension
-    #     vcf_gz_filename = filename * ".vcf.gz" # Check for .vcf.gz compressed file
-
-    #     if isfile(vcf_filename)
-    #         # If the .vcf file exists, use it
-    #         vcffile = vcf_filename
-    #     elseif isfile(vcf_gz_filename)
-    #         # If the .vcf.gz file exists, use it
-    #         vcffile = vcf_gz_filename
-    #     else
-    #         # Look for alternative formats using allowed file extensions
-    #         fmt = findfirst(isfile, filename * ".vcf." .* SnpArrays.ALLOWED_FORMAT)
-
-    #         # If no file is found with the given formats, throw an error
-    #         if fmt === nothing
-    #             throw(ArgumentError("VCF file not found. Allowed formats: " * join(SnpArrays.ALLOWED_FORMAT, ", ")))
-    #         end
-
-    #         # Assign the file with the correct format
-    #         vcffile = filename * ".vcf." * SnpArrays.ALLOWED_FORMAT[fmt]
-    #     end
-
-    #     # Obtain the number of samples from the VCF file (changing to GeneticVariantBase if necessary)
-    #     bedn = VCFTools.nsamples(vcffile)  # Note: Change to `GeneticVariantBase` if needed
-    # end
-
 
     iterator = nothing
     data = nothing  
@@ -752,7 +706,11 @@ function univariate_score_test(
 
     if filetype == "PLINK"
         # create SnpArray
-        genomat = SnpArrays.SnpArray(filename, bedn) # is a SnpArray from the bedfile 
+        data = SnpArrays.SnpData(filename)
+        bedn = SnpArrays.n_samples(data)
+        genomat = SnpArrays.SnpArray(filename * ".bed", bedn) # is a SnpArray from the bedfile 
+
+        # SnpArray expects .bed but SnpData does not 
     
         # data.bed then take the string and remove the .bed 
         # s = SnpData(“data”) genomat = s.snparray
@@ -760,28 +718,35 @@ function univariate_score_test(
         cc = SnpArrays.counts(genomat, dims=1) # column counts of genomat
         mafs = SnpArrays.maf(genomat)
     
-        # create SNP mask vector
+        # # create SNP mask vector
+        # if snpinds === nothing
+        #     snpmask = trues(SnpArrays.makestream(countlines, filename * ".bed"))
+        # elseif eltype(snpinds) == Bool
+        #     snpmask = snpinds
+        # else
+        #     snpmask = falses(SnpArrays.makestream(countlines, filename * ".bed"))
+        #     snpmask[snpinds] .= true
+        # end
+
+        nsnps = SnpArrays.n_variants(data)
         if snpinds === nothing
-            snpmask = trues(SnpArrays.makestream(countlines, filename))
+            snpmask = trues(nsnps)
         elseif eltype(snpinds) == Bool
             snpmask = snpinds
         else
-            snpmask = falses(SnpArrays.makestream(countlines, filename))
+            snpmask = falses(nsnps)
             snpmask[snpinds] .= true
         end
+
 
         # carry out score or LRT test SNP by SNP
         snponly = testformula.rhs == Term(:snp)
 
-        file = replace(filename, ".bed" => "") 
-        data = SnpData(file)
-        # data = SnpData(SnpArrays.datadir(file))
-
-       #  SnpArray(SnpArrays.datadir(data))
+        # file = replace(filename, ".bed" => "") 
+        data = SnpArrays.SnpData(filename)
 
         # CREATE SNP iterator
-        iterator = SnpArrayIterator(data)
-        # n = size(SnpArray(SnpArrays.datadir(data)), 1)
+        iterator = SnpArrays.SnpArrayIterator(data)
     end 
 
    # END OF PLINK IF STATEMENT 
@@ -815,8 +780,8 @@ function univariate_score_test(
         config_solver(solver, solver_config)
         # open BGEN file and get number of SNPs in file
         bgendata = Bgen(filename; sample_path=samplepath)
-        t = typeof(bgendata)
-        println("TYPE OF BGENDATA $t")
+        # t = typeof(bgendata)
+        # println("TYPE OF BGENDATA $t")
         nsnps = GeneticVariantBase.n_variants(bgendata) 
         # bgen_iterator = iterator(bgendata, from_bgen_starts = true) # interchangeable with GeneticVariantBase iterator
         bgen_iterator = BGEN.BgenVariantIteratorFromStart(bgendata) 
@@ -855,7 +820,7 @@ function univariate_score_test(
     # START OF VCF IF STATEMENT
     
     if filetype == "VCF"
-        print("entered if statement")
+        # print("entered if statement")
 
         config_solver(solver, solver_config)
         # get number of SNPs in file
@@ -881,8 +846,14 @@ function univariate_score_test(
         reader = VCF.Reader(openvcf(vcffile))
                 
         # CREATE VCF iterator
-        iterator = VCFIterator(vcffile)
-        data = VCFData(vcffile)
+
+
+        iterator = VCFTools.VCFIterator(vcffile)
+        data = VCFTools.VCFData(vcffile)
+        
+        
+        
+        
         n = VCFTools.nsamples(vcffile)
 
     end 
@@ -893,9 +864,9 @@ function univariate_score_test(
 
     # Iterate through each index in snpmask 
 
-    open(pvalfile, "w") do io
+    open(pvalfile, "a") do io
         for (j, variant) in enumerate(iterator) #this is weird need to fix later 
-            print("entered for loop")
+            # print("entered for loop")
 
             # variant, _ = iterate(iterator, j)
             # println(variant)
@@ -915,9 +886,14 @@ function univariate_score_test(
             end 
 
             if filetype == "PLINK"
-                variant = SnpArrayIndex(j)
+                variant = SnpArrays.SnpArrayIndex(j)
                 dosages = fill(0.0, length(iterator.snpdata.snparray))
+
+
                 GeneticVariantBase.alt_dosages!(dosages, iterator.snpdata, variant)
+
+
+                
             end 
 
             if filetype == "BGEN"
@@ -947,11 +923,6 @@ function univariate_score_test(
     
             ts = OrdinalMultinomialScoreTest(fittednullmodel.model, Z)
             ts.Z .= dosages[rowinds] 
-
-            #println("TS.Z")
-            #println((ts.Z))
-
-            # println(variant)
 
             chrom = GeneticVariantBase.chrom(data, variant)
             pos = GeneticVariantBase.pos(data, variant)
@@ -983,15 +954,20 @@ function univariate_score_test(
             pval = nothing 
             if mafreq == 1 || mafreq == 0
                 pval = 1.0
-                #println("entered if statement maf = $mafreq, pval = $pval")
             else
+
+             
                 pval = polrtest(ts)
-                #println("entered else statement maf = $mafreq,pval = $pval")
+
+
+
             end 
 
+
+
             # FOR VISUALIZATION PURPOSES WILL DELETE LATER 
-            println("chr,pos,snpid,allele1,allele2,maf,hwepval,infoscore,pval")
-            println("$chrom, $pos, $snpid, $allele1, $allele2, $mafreq, $hwe_pval, $info_score, $pval")
+            # println("chr,pos,snpid,allele1,allele2,maf,hwepval,infoscore,pval")
+            # println("$chrom, $pos, $snpid, $allele1, $allele2, $mafreq, $hwe_pval, $info_score, $pval")
 
             println(io, "$chrom, $pos, $snpid, $allele1, $allele2, $mafreq, $hwe_pval, $info_score, $pval")
         end
