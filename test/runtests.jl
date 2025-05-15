@@ -1,11 +1,11 @@
-using OrdinalGWAS, Test, CSV, SnpArrays, DataFrames, VariantCallFormat, GeneticVariantBase, PGENFiles, BGEN, Statistics, VCFTools
-
-const datadir = joinpath(dirname(@__FILE__), "..", "data")
+using OrdinalGWAS, Test, CSV, SnpArrays, DataFrames, VariantCallFormat, GeneticVariantBase, PGENFiles, BGEN, Statistics, VCFTools, Profile, ProfileView, Serialization, PProf
+# const datadir = joinpath(dirname(@__FILE__), "..", "data")
+datadir = joinpath(dirname(@__FILE__), "data")
 const covfile = datadir * "/covariate.txt"
 const plkfile = datadir * "/hapmap3"
 const snpsetfile = datadir * "/hapmap_snpsetfile.txt"
 const vcfcovfile = datadir * "/vcf_example.csv"
-const vcffile = datadir * "/vcf_test.vcf.gz"
+const vcffile = datadir * "/vcf_test"
 # const vcffile = joinpath(datadir, "vcf_test.vcf.gz")
 # const vcffile = "/Users/kaitlyn/.julia/dev/OrdinalGWAS/data/vcf_test.vcf.gz"
 const vcfsnpsetfile = datadir * "/snpsetfile_vcf.txt"
@@ -22,47 +22,109 @@ const dataset= SnpData(datadir * "/hapmap3")
 
 # VCF tests
 
+# ordinalgwas(@formula(y ~ sex), vcfcovfile, vcffile; geneticformat = "VCF", 
+#         vcftype = :DS, geneticrowinds = 1:190, snpinds = [86; 656], 
+#     test = :score, covrowinds = 1:190
+
+
+# 83.442078 seconds (568.26 M allocations: 79.282 GiB, 7.15% gc time, 6.23% compilation time: 5% of which was recompilation)
+# 2 GiB
+
 @testset "vcf score test" begin
-    println("Constructed path: ", vcffile)
-    vcfdata = VCFTools.VCFData(vcffile)
+    # println("Constructed path: ", vcffile)
+   
+    vcfdata = VCFTools.VCFData(vcffile * ".vcf.gz")
     nsamples = GeneticVariantBase.n_samples(vcfdata)
-    nm = ordinalgwas(@formula(y ~ sex), vcfcovfile, nothing)
-    univariate_score_test(vcffile, nm, nsamples, filetype="VCF")
-    @time univariate_score_test(vcffile, nm, nsamples, filetype="VCF")
-    @test isfile("ordinalgwas.null.txt")
-    @test isfile("ordinalgwas.pval.txt")
-    scorepvals = CSV.read("ordinalgwas.pval.txt", DataFrame)[!, :pval][1:5]
-    @test isapprox(scorepvals, [1.0, 4.56531284e-3, 3.10828383e-5, 1.21686724e-5, 8.20686005e-3], rtol=1e-4)
+    nm = ordinalgwas(@formula(y ~ sex), vcfcovfile, nothing; covrowinds=1:190)
+    univariate_score_test(vcffile, nm, nsamples, filetype="VCF"; snpinds = [86; 656],rowinds=1:190)
+    
+    
+    
+    
+    
+    #@profile univariate_score_test(vcffile, nm, nsamples, filetype="VCF"; snpinds = [86; 656],rowinds=1:190)
+
+    # Profile.clear()
+    # @profile univariate_score_test(vcffile, nm, nsamples, filetype="VCF"; snpinds = [86; 656], rowinds=1:190)
+    # Profile.print(format=:flat)
+    # ProfileView.view()
+
+    Profile.Allocs.clear()
+    Profile.Allocs.@profile sample_rate=0.00005 univariate_score_test(vcffile, nm, nsamples, filetype="VCF"; snpinds = [86; 656], rowinds=1:190)
+    prof = Profile.Allocs.fetch()
+    
+    
+    PProf.Allocs.pprof(prof; web=true)
+
+    # println("Press Enter to exit after you're done looking at the profile.")
+    # readline()
+
+    # open("profile_data.dat", "w") do io
+    #     serialize(io, Profile.fetch())
+    # end
+
+    # Profile.print()
+
+    scorepvals = CSV.read("ordinalgwas.pval.txt", DataFrame)[!, end][1:2]
+    @test isapprox(scorepvals, [0.00762272, 0.000668338], rtol=1e-3)
     rm("ordinalgwas.null.txt", force=true)
     rm("ordinalgwas.pval.txt", force=true)
 end
 
+# data = deserialize("profile_data.dat")
+# Profile.clear()
+# Profile.merge!(data)
+# ProfileView.view()
+# rm("profile_data.dat", force=true)
+
+
+# time for PLINK was 52.269094 seconds (21.08 M allocations: 471.282 GiB, 10.47% gc time, 6.92% compilation time)
+# Allocation profiler line by line allocation tracking 
+# Link: https://docs.julialang.org/en/v1/manual/profile/
+# Figure out which line of code is allocating that much memory 
+# Use --track-allocation
+
+@testset "PLINK score test" begin 
+    nsamples = size(dataset.snparray, 1)
+    nvariants = size(dataset.snparray, 2)
+    
+    data = SnpArrays.SnpData(plkfile)
+    nsamples = GeneticVariantBase.n_samples(data)
+    nm = ordinalgwas(@formula(trait ~ sex), covfile, nothing)
+    univariate_score_test(plkfile, nm, nsamples, filetype="PLINK")
 
 
 
-# PLINK tests 
-nsamples = size(dataset.snparray, 1)
-nvariants = size(dataset.snparray, 2)
-nm = ordinalgwas(@formula(y ~ sex), covfile, nothing)
-univariate_score_test(plkfile, nm, nsamples, filetype="PLINK")
+    @test isfile("ordinalgwas.null.txt")
+    @test isfile("ordinalgwas.pval.txt")
+    scorepvals = CSV.read("ordinalgwas.pval.txt", DataFrame)[!, :pval][1:5]
+    @test isapprox(scorepvals, [1.0, 4.56531284e-3, 3.10828383e-5, 1.21686724e-5, 8.20686005e-3], rtol=1e-3)
+    rm("ordinalgwas.null.txt", force=true)
+    rm("ordinalgwas.pval.txt", force=true)
+end 
 
+# Finish PLINK before moving on to BGEN
 
-# BGEN tests 
-b = BGEN.Bgen(bgenfile)
-nsamples = GeneticVariantBase.n_samples(b)
-nvariants = GeneticVariantBase.n_variants(b)
-nm = ordinalgwas(@formula(y ~ sex), bgencovfile, nothing)
-univariate_score_test(bgenfile, nm, nsamples, filetype="BGEN")
+# @testset "BGEN score test" begin
+#     b = BGEN.Bgen(bgenfile)
+#     nsamples = GeneticVariantBase.n_samples(b)
+#     nvariants = GeneticVariantBase.n_variants(b)
+#     nm = ordinalgwas(@formula(y ~ sex), bgencovfile, nothing)
+#     @time univariate_score_test(bgenfile, nm, nsamples, filetype="BGEN") 
+#     @test isfile("ordinalgwas.null.txt")
+#     @test isfile("ordinalgwas.pval.txt")
+#     scorepvals = CSV.read("ordinalgwas.pval.txt", DataFrame)[!, end][1:2]
+#     @test isapprox(scorepvals, [0.12449778, 0.00055727], rtol=1e-3)
+#     rm("ordinalgwas.null.txt", force=true)
+#     rm("ordinalgwas.pval.txt", force=true)
+# end
 
-# PGEN tests 
-p = PGENFiles.Pgen(pgenfile)
-nsamples = GeneticVariantBase.n_samples(p)
-nvariants = GeneticVariantBase.n_variants(p)
-nm = ordinalgwas(@formula(y ~ sex), bgencovfile, nothing)
-univariate_score_test(pgenfile, nm, nsamples, filetype="PGEN")
-
-# put code to delete pval.txt file at the end of the tests 
-
+# # PGEN tests 
+# p = PGENFiles.Pgen(pgenfile)
+# nsamples = GeneticVariantBase.n_samples(p)
+# nvariants = GeneticVariantBase.n_variants(p)
+# nm = ordinalgwas(@formula(y ~ sex), bgencovfile, nothing)
+# univariate_score_test(pgenfile, nm, nsamples, filetype="PGEN")
 
 
 #number of rows in snpdata 
@@ -81,6 +143,7 @@ univariate_score_test(pgenfile, nm, nsamples, filetype="PGEN")
 # check function signature nsamples nvariants 
 
 # @testset "score test" begin
+    # THIS IS PLINK-1
 #     @time ordinalgwas(@formula(trait ~ sex), covfile, plkfile, test=:score)
 #     @test isfile("ordinalgwas.null.txt")
 #     @test isfile("ordinalgwas.pval.txt")

@@ -1,1 +1,0 @@
-chr,pos,snpid,allele1,allele2,maf,hwepval,infoscore,pval
