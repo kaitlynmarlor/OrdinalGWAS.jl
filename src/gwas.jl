@@ -882,18 +882,13 @@ function univariate_score_test(
             # merge these by defining n_samples in GeneticVariantBase
             if filetype == "VCF"
                 dosages = fill(0.0, length(variant.GENOTYPE))
-                GeneticVariantBase.alt_dosages!(dosages, variant) 
+                GeneticVariantBase.alt_dosages!(dosages, variant; mean_impute=true) 
             end 
 
             if filetype == "PLINK"
                 variant = SnpArrays.SnpArrayIndex(j)
                 dosages = fill(0.0, length(iterator.snpdata.snparray))
-
-
-                GeneticVariantBase.alt_dosages!(dosages, iterator.snpdata, variant)
-
-
-                
+                GeneticVariantBase.alt_dosages!(dosages, iterator.snpdata, variant; mean_impute=true)
             end 
 
             if filetype == "BGEN"
