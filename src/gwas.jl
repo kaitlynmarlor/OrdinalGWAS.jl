@@ -747,6 +747,8 @@ function univariate_score_test(
 
         # CREATE SNP iterator
         iterator = SnpArrays.SnpArrayIterator(data)
+        genomat = SnpArrays.SnpArray(filename * ".bed", SnpArrays.n_samples(data))
+        dosages = fill(0.0, GeneticVariantBase.n_samples(data)) 
     end 
 
    # END OF PLINK IF STATEMENT 
@@ -855,6 +857,7 @@ function univariate_score_test(
         
         
         n = VCFTools.nsamples(vcffile)
+        # DEFINE DOSAGES HERE FOR ALL OF THE FILE TYPES 
 
     end 
 
@@ -863,6 +866,7 @@ function univariate_score_test(
     # START OF SINGULAR FOR LOOP 
 
     # Iterate through each index in snpmask 
+
 
     open(pvalfile, "a") do io
         for (j, variant) in enumerate(iterator) #this is weird need to fix later 
@@ -887,12 +891,11 @@ function univariate_score_test(
 
             if filetype == "PLINK"
                 variant = SnpArrays.SnpArrayIndex(j)
-                dosages = fill(0.0, length(iterator.snpdata.snparray))
-                GeneticVariantBase.alt_dosages!(dosages, iterator.snpdata, variant; mean_impute=true)
+                GeneticVariantBase.alt_dosages!(dosages, iterator.snpdata, variant)
             end 
 
             if filetype == "BGEN"
-                dosages = fill(0.0, GeneticVariantBase.n_samples(data))
+                dosages = fill(0.0, GeneticVariantBase.n_samples(data)) # could use this as unified line
                 GeneticVariantBase.alt_dosages!(dosages, data, variant; mean_impute=true)
             end 
 
@@ -917,7 +920,12 @@ function univariate_score_test(
             # SnpArrays.makestream(pvalfile, "w") do io
     
             ts = OrdinalMultinomialScoreTest(fittednullmodel.model, Z)
+            # println(length(rowinds))
+            # println(sum(rowinds))
+            # println(size(dosages[rowinds]))
+            # println(size(ts.Z))
             ts.Z .= dosages[rowinds] 
+            
 
             chrom = GeneticVariantBase.chrom(data, variant)
             pos = GeneticVariantBase.pos(data, variant)
@@ -950,12 +958,8 @@ function univariate_score_test(
             if mafreq == 1 || mafreq == 0
                 pval = 1.0
             else
-
-             
+                # println("entered else")
                 pval = polrtest(ts)
-
-
-
             end 
 
 
